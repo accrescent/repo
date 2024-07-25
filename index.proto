@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package app.accrescent.repository;
+
+message SignedIndex {
+  // A serialized Index intended to be verified by signature
+  bytes index = 1;
+  // A map of base64-encoded signify (https://man.openbsd.org/signify) public keys to their
+  // associated base64-encoded signatures.
+  //
+  // The client verification process consists of:
+  //
+  // 1. Finding the public key in this field which matches the public key trusted by the client
+  // 2. Verifying the index field using said key and its associated signature
+  //
+  // If the client's trusted public key isn't found in this field, the client must abort the index
+  // verification process as failed.
+  map<string, string> signatures = 2;
+}
+
+message Index {
+  // The version of the index's contents.
+  //
+  // This field is used for index downgrade protection. Its value must increase every time any
+  // change is made to any subfield of this message, and the client must never trust an index update
+  // with a lower version that was previously trusted.
+  uint64 version = 1;
+  // A map of app IDs to their verification info
+  map<string, AppVerificationInfo> apps = 2;
+}
+
+message AppVerificationInfo {
+  // The minimum version code of this app that the client should accept.
+  //
+  // This field is used to prevent an attacker with repository access from serving outdated, genuine
+  // versions of an app with possible security vulnerabilities to new users. Its value should be
+  // regularly and frequently updated to the latest published version code to remain effective.
+  uint64 min_version_code = 1;
+  // The certificate or certificates used to sign this application.
+  //
+  // If the application was signed with a single certificate, then signing_certificate_history will
+  // be set. If it was signed with multiple certificates, then apk_contents_signers will be set.
+  //
+  // The client must verify the application's signer(s) according to the documentation of each
+  // individual message.
+  oneof certificates {
+    SigningCertificateHistory signing_certificate_history = 2;
+    ApkContentsSigners apk_contents_signers = 3;
+  }
+}
+
+// The signing certificate history of an application signed by a single signer.
+message SigningCertificateHistory {
+  // A map of version codes to SHA-256 certificate fingerprints.
+  //
+  // This map is necessary to ensure that the index and app repository metadata can be updated
+  // asynchronously (as in the case of server-side caching) without temporarily breaking updates for
+  // some users when an app's signing certificate is rotated.
+  //
+  // The client must verify the signer according to the following steps:
+  //
+  // 1. Find the maximum version code in signing_cert_hashes less than or equal to the version code
+  //    of the app.
+  // 2. Find the last certificate in the app's signing certificate lineage.
+  // 3. Compare the signing certificate hash associated with (1) with the hash obtained in (2).
+  //    Verification succeeds if and only if they match.
+  map<uint64, string> signing_cert_hashes = 1;
+}
+
+// The signers of an application signed by multiple signers.
+message ApkContentsSigners {
+  // The SHA-256 certificate fingerprints of all signers.
+  //
+  // The client must verify that the app is signed by all certificates in this field and no others.
+  repeated string signing_cert_hashes = 1;
+}
